@@ -1,0 +1,116 @@
+#Interpreter: Pytho 3..11.9 64-bit (Microsoft Store)
+#Libraries: pandas, matplotlib, seaborn, geopandas
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import geopandas as gpd
+
+#change as per your file dirctory
+path_rain = r"C:\Users\tanya\Desktop\Tanya\Internship ss24\ss25\rainfall_mh_apr_jun24.csv" # rainfall dataset
+path_tractor = r"C:\Users\tanya\Desktop\Tanya\Internship ss24\ss25\data_day_mh_apr_jun24.csv" # tractor dataset
+
+# Load datasets
+rain_df = pd.read_csv(path_rain)  
+tractor_df = pd.read_csv(path_tractor)  
+
+# Date formatting
+rain_df['date'] = pd.to_datetime(rain_df['date'])
+tractor_df['day'] = pd.to_datetime(tractor_df['day'])
+
+# Helper to save plots
+def save_plot(filename):
+   # plt.show()
+    plt.tight_layout()
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    plt.close()
+
+# Preprocess for avg perf
+tractor_df['day'] = pd.to_datetime(tractor_df['day'])
+rain_df['date'] = pd.to_datetime(rain_df['date'])
+
+tractor_df['week'] = tractor_df['day'].dt.isocalendar().week
+rain_df['week'] = rain_df['date'].dt.isocalendar().week
+
+tractor_df['year'] = tractor_df['day'].dt.year
+rain_df['year'] = rain_df['date'].dt.year
+
+# NORMALIZED DATA 
+# Per-tractor per-week activity
+weekly_per_tractor = tractor_df.groupby(['year', 'week', 'district', 'device_fk_id']).agg({
+    'total_area_acres': 'sum',
+    'total_engine_hrs': 'sum',
+    'total_farming_hrs': 'sum'
+}).reset_index()
+
+# District-week average per tractor
+weekly_avg = weekly_per_tractor.groupby(['year', 'week', 'district']).agg({
+    'total_area_acres': 'mean',
+    'total_engine_hrs': 'mean',
+    'total_farming_hrs': 'mean'
+}).reset_index()
+weekly_avg['week_label'] = weekly_avg['year'].astype(str) + "-W" + weekly_avg['week'].astype(str)
+
+# Weekly rainfall per district
+rain_weekly = rain_df.groupby(['year', 'week', 'dt_name']).agg({
+    'precip_mm': 'sum'
+}).reset_index().rename(columns={'dt_name': 'district'})
+
+# Merge rainfall and tractor data
+merged = pd.merge(weekly_avg, rain_weekly, on=['year', 'week', 'district'], how='left')
+
+# TASK 1: WEEKLY TRENDS 
+plt.figure(figsize=(12, 6))
+sns.lineplot(data=weekly_avg, x='week', y='total_area_acres', estimator='mean')
+plt.title("Task 1: Avg Acres per Tractor per Week (Statewide)")
+plt.xlabel("Week")
+plt.ylabel("Acres per Tractor")
+save_plot("task1_avg_weekly_acres_per_tractor.png")
+
+
+# TASK 2: REGIONAL PATTERNS 
+district_avg = weekly_avg.groupby('district')['total_area_acres'].mean().sort_values(ascending=False).reset_index()
+
+plt.figure(figsize=(12, 8))
+sns.barplot(data=district_avg, y='district', x='total_area_acres', palette='Greens_d')
+plt.title("Task 2: Avg Acres per Tractor per Week by District")
+plt.xlabel("Avg Acres per Tractor")
+
+save_plot("task2_avg_acres_per_tractor_by_district.png")
+
+
+# TASK 3: RAINFALL vs ACTIVITY 
+plt.figure(figsize=(8, 6))
+sns.scatterplot(data=merged, x='precip_mm', y='total_area_acres', hue='district', alpha=0.6)
+plt.title("Task 3: Rainfall vs Avg Acres per Tractor")
+plt.xlabel("Weekly Rainfall (mm)")
+plt.ylabel("Avg Acres per Tractor")
+
+save_plot("task3_rain_vs_acres_per_tractor.png")
+
+
+# Lag plot: rain[t-1] vs acres[t]
+merged['rain_lag1'] = merged.groupby('district')['precip_mm'].shift(1)
+
+plt.figure(figsize=(8, 6))
+sns.scatterplot(data=merged.dropna(), x='rain_lag1', y='total_area_acres', hue='district', alpha=0.6)
+plt.title("Task 3: Lag Plot – Rain[t-1] vs Acres[t]")
+plt.xlabel("Previous Week Rainfall (mm)")
+plt.ylabel("Avg Acres per Tractor")
+
+save_plot("task3_lag_rain_vs_acres.png")
+
+
+# TASK 4: REGIONAL RAINFALL SENSITIVITY 
+district_corr = merged.groupby('district').apply(
+    lambda df: df['precip_mm'].corr(df['total_area_acres'])
+).dropna().reset_index(name='rain_sensitivity')
+
+district_corr_sorted = district_corr.sort_values('rain_sensitivity', ascending=False)
+
+plt.figure(figsize=(12, 8))
+sns.barplot(data=district_corr_sorted, y='district', x='rain_sensitivity', palette='coolwarm')
+plt.title("Task 4: Rainfall Sensitivity (Corr) of Avg Acres per Tractor")
+plt.xlabel("Rain–Activity Correlation")
+save_plot("task4_rain_sensitivity.png")
+
